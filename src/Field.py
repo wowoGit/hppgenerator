@@ -21,6 +21,14 @@ class XmlField(XmlObject):
 class XmlFieldProperty(XmlField):
     def _init__(self, node: ET.Element):
         super().__init__(node)
+    def generateHpp(self):
+        result = ""
+        type_ = self.xmlnode.find('type').text
+        name = self.xmlnode.find('name').text
+        read = self.xmlnode.find('read').text
+        write = self.xmlnode.findtext('write',default="")
+        result += "Q_PROPERTY(" + type_ + ' ' + name + ' ' + 'READ ' + read + ' WRITE ' + write +' ' + "NOTIFY " + name + 'Changed)'
+        return result
 
 class XmlFieldVariable(XmlField):
     def _init__(self, node: ET.Element):
@@ -29,6 +37,10 @@ class XmlFieldVariable(XmlField):
 class XmlFieldFunc(XmlField):
     def _init__(self, node: ET.Element):
         super().__init__(node)
+    
+    def generateHpp(self):
+        result = ""
+        
 
 class XmlFieldSignal(XmlField):
     def _init__(self, node: ET.Element):
@@ -37,19 +49,16 @@ class XmlFieldSignal(XmlField):
 
 class FieldFactory():
     def GetField(fieldtype : str, node): 
-        print()
         if fieldtype == FieldType.PubFunction.value  or fieldtype == FieldType.PrivFunction.value:
             return XmlFieldFunc(node)
 
-        elif fieldtype == FieldType.Variable.value:
+        elif fieldtype == FieldType.Variable.value or fieldtype == FieldType.PrivVariable.value:
             return XmlFieldVariable(node)
 
         elif fieldtype == FieldType.Property.value:
             return XmlFieldProperty(node)
 
         elif fieldtype == FieldType.Signal.value:
-            return XmlFieldProperty(node)
-        elif fieldtype == FieldType.PrivVariable.value:
             return XmlFieldProperty(node)
 
 

@@ -7,7 +7,9 @@ class XmlSection(XmlObject):
         super().__init__(xmlnode)
         self.kind = xmlnode.get('kind')
         self.fields = [FieldFactory.GetField(self.kind,node) for node in self.xmlnode.findall('memberdef')]
-        print("Kind" + self.kind)
-        print(self.fields)
-        for field in self.fields:
-            field.print()
+        self.print()
+
+    def print(self):
+        if self.kind == 'property':
+            for field in self.fields:
+                print(field.generateHpp())

@@ -9,5 +9,6 @@ class XmlObject:
 
     def print(self):
         print(self.xmlnode.tag, self.xmlnode.attrib)
+
     def generateHpp(self):
         raise NotImplementedError()

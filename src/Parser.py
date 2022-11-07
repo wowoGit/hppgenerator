@@ -2,6 +2,6 @@ from Class import XmlClass
 
 
 def main():
-    testClass = XmlClass("../testfiles/classActiveCallClient.xml")
+    testClass = XmlClass("/home/vsildirian/etc/hppgenerator/testfiles/classActiveCallClient.xml")
 
 main()
