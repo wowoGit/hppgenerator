@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 
 
 class XmlObject:
-    def __(self,node: ET.Element):
+    def __init__(self,node: ET.Element):
         self.xmlnode = node
     
 

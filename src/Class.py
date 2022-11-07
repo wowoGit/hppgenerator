@@ -5,8 +5,8 @@ from Object import XmlObject
 class XmlClass(XmlObject):
     def __init__(self,xmlnode):
         doc = ET.parse(xmlnode)
-        self.root = doc.getroot()
-        self.xmlnode = self.root.find('compounddef')
+        root = doc.getroot()
+        super().__init__(root.find('compounddef'))
         self.sections = [XmlSection(node) for node in self.xmlnode.findall('sectiondef')]
     
     
