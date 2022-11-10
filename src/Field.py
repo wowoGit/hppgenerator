@@ -1,16 +1,7 @@
 import xml.etree.ElementTree as ET
 from Object import XmlObject
 import enum
-from Mapper import properties
 
-
-class FieldType(enum.Enum):
-    PubFunction = 'public-func'
-    PrivFunction = 'private-func'
-    Variable = 'variable'
-    PrivVariable = 'private-attrib'
-    Signal   = 'signal'
-    Property = 'property'
 
 
 
@@ -21,6 +12,13 @@ FieldType: method, attribute, property, typedef, enum
 class XmlField(XmlObject):
     def __init__(self, node : ET.Element):
         super().__init__(node)
+    def removescope(self,node:ET.Element,full_def:str):
+            class_name = node.get('id')[5:node.get('id').find('_')]
+            namespace_end_pos = full_def.rfind('::')+2
+            namespace_start_pos = full_def[:namespace_end_pos].rfind(class_name)
+            stripped_def = full_def[:namespace_start_pos]
+            return stripped_def
+
 
 
 class XmlFieldProperty(XmlField):
@@ -39,28 +37,38 @@ class XmlFieldProperty(XmlField):
         print(res)
         #print("QPROPERTY({0} {1} {2} {3} {4}".format())
 
-class XmlFieldVariable(XmlField):
-    def _init__(self, node: ET.Element):
-        super().__init__(node)
-    def generateHpp(self):
-        return str()
 
 class XmlFieldFunc(XmlField):
     def __init__(self, node: ET.Element):
         super().__init__(node)
+        
         self.definition = self.formDefinition(node)
 
     def formDefinition(self, node: ET.Element):
         func_def = ""
-        func_name = node.find('name').text[1:] if node.find('name').text.startswith('~') else node.find('name').text
-        for attr in node.attrib.keys():
-            if node.attrib[attr] == 'yes' and attr != "const":
-                func_def += attr + " "
-        if node.find('definition').text.startswith(func_name):
+        full_def = node.find('definition').text
+        func_name = node.find('name').text
+        template = ""
+
+
+
+        if self.containsField(node,'templateparamlist'):
+            templatelist = node.find('templateparamlist')
+            template = "template< "
+            for field in templatelist.getchildren():
+                template += field.findtext('type') + ' '
+                if self.containsField(field,'declname'):
+                    template += field.findtext('declname') + ' '
+            template += '>\n'
+
+        if full_def.startswith(func_name) or func_name.startswith('~'):
             func_def += ' ' + func_name
         else:
-            func_def += node.find('definition').text
-        func_def += node.find('argsstring').text
+            stripped_def = self.removescope(node,full_def)
+            func_def += stripped_def + func_name
+        if self.containsField(node,'argsstring'):
+            func_def += node.findtext('argsstring')
+        func_def = template + func_def
         return func_def
             
     def print(self):
@@ -69,19 +77,30 @@ class XmlFieldFunc(XmlField):
         print(self.detailed)
         print(self.definition)
 
+class XmlFieldVariable(XmlFieldFunc):
+    def __init__(self, node: ET.Element):
+        super().__init__(node)
+        self.initializer = None
+        if self.containsField(node,'initializer'):
+            self.initializer = node.findtext('initializer')
+            self.definition += ' ' + self.initializer
+    
+    def print(self):
+        print("-----------------------")
+        print(self.brief)
+        print(self.detailed)
+        print(self.definition)
 
+FieldMapper  = {
+    "signal": globals()["XmlFieldFunc"],
+    "function": globals()['XmlFieldFunc'],
+    "property": globals()['XmlFieldProperty'],
+    "variable": globals()['XmlFieldVariable'],
+    "typedef": globals()['XmlFieldVariable']
+}
 class FieldFactory():
     def GetField(fieldtype : str, node): 
-        if (fieldtype == FieldType.PubFunction.value   or 
-            fieldtype == FieldType.PrivFunction.value  or
-            fieldtype == FieldType.Signal.value):
-            return XmlFieldFunc(node)
-
-        elif fieldtype == FieldType.Variable.value or fieldtype == FieldType.PrivVariable.value:
-            return XmlFieldVariable(node)
-
-        elif fieldtype == FieldType.Property.value:
-            return XmlFieldProperty(node)
+        return FieldMapper[fieldtype](node)
 
 
 

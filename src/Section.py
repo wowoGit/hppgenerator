@@ -6,7 +6,7 @@ class XmlSection(XmlObject):
     def __init__(self,xmlnode: ET.Element):
         super().__init__(xmlnode)
         self.kind = xmlnode.get('kind')
-        self.fields = [FieldFactory.GetField(self.kind,node) for node in self.xmlnode.findall('memberdef')]
+        self.fields = [FieldFactory.GetField(node.get('kind'),node) for node in self.xmlnode.findall('memberdef')]
 
     def print(self):
             for field in self.fields:

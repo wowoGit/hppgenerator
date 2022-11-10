@@ -26,16 +26,15 @@ class XmlObject:
             detailed_node = node.find('detaileddescription')
             for para in detailed_node.getchildren():
                 if self.containsField(para, 'parameterlist'):
-                    for field in para.getchildren():
-                        for item in field.getchildren():
-                            param_name_list = item.getchildren()[0]
-                            param_name = param_name_list[0]
+                    for field in para.find('parameterlist').getchildren():
+                            #param_name_list = item.getchildren()[0]
+                            param_name = field.find('parameternamelist/parametername')
                             param_dir = param_name.get('direction')
                             param_name_text = param_name.text
-                            param_desc = item.find('parameterdescription/para').text
-                            self.detailed += "@param[{0}] {1} {2}\n".format(param_dir, param_name_text, param_desc)
+                            param_desc_text = field.find('parameterdescription/para').text
+                            self.detailed += "@param[{0}] {1} {2}\n".format(param_dir, param_name_text, param_desc_text)
                 if self.containsField(para, "simplesect"):
-                    simplesect = para.getchildren()[0]
+                    simplesect = para.find('simplesect')
                     kind = simplesect.get('kind')
                     simplesect_text = simplesect.find('para').text
                     self.detailed +="@{0} {1}".format(kind,simplesect_text)
