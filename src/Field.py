@@ -1,6 +1,5 @@
 import xml.etree.ElementTree as ET
 from Object import XmlObject
-import enum
 
 
 
@@ -14,9 +13,10 @@ class XmlField(XmlObject):
         super().__init__(node)
     def removescope(self,node:ET.Element,full_def:str):
             class_name = node.get('id')[5:node.get('id').find('_')]
-            namespace_end_pos = full_def.rfind('::')+2
-            namespace_start_pos = full_def[:namespace_end_pos].rfind(class_name)
-            stripped_def = full_def[:namespace_start_pos]
+            namespace_start_pos = full_def.find(class_name)
+            first = full_def[:namespace_start_pos]
+            second = full_def[full_def.rfind('::')+2:]
+            stripped_def = first + second
             return stripped_def
 
 
@@ -34,7 +34,7 @@ class XmlFieldProperty(XmlField):
         if self.write is not None:
             res += "WRITE {0} ".format(self.write)
         res += "NOTIFY {0}Changed)".format(self.name)
-        print(res)
+        return res
         #print("QPROPERTY({0} {1} {2} {3} {4}".format())
 
 
@@ -48,34 +48,34 @@ class XmlFieldFunc(XmlField):
         func_def = ""
         full_def = node.find('definition').text
         func_name = node.find('name').text
-        template = ""
 
 
-
-        if self.containsField(node,'templateparamlist'):
-            templatelist = node.find('templateparamlist')
-            template = "template< "
-            for field in templatelist.getchildren():
-                template += field.findtext('type') + ' '
-                if self.containsField(field,'declname'):
-                    template += field.findtext('declname') + ' '
-            template += '>\n'
 
         if full_def.startswith(func_name) or func_name.startswith('~'):
-            func_def += ' ' + func_name
+            if node.get('explicit') == 'yes':
+                func_def += 'explicit '
+            func_def += func_name
         else:
             stripped_def = self.removescope(node,full_def)
-            func_def += stripped_def + func_name
+            func_def += stripped_def 
         if self.containsField(node,'argsstring'):
             func_def += node.findtext('argsstring')
-        func_def = template + func_def
+        if self.template is not None:
+            func_def = self.template + func_def
         return func_def
             
-    def print(self):
-        print("-----------------------")
-        print(self.brief)
-        print(self.detailed)
-        print(self.definition)
+    def print(self) -> str:
+        res = ""
+        if self.brief is not None:
+            res += "/**\n"  
+            res +='* ' + self.brief + '\n'
+            if self.detailed is not None:
+                for field in self.detailed:
+                    res += '* ' + field + '\n'
+            res += '**/\n'
+        if self.definition is not None:
+            res += self.definition 
+        return res
 
 class XmlFieldVariable(XmlFieldFunc):
     def __init__(self, node: ET.Element):
@@ -86,10 +86,7 @@ class XmlFieldVariable(XmlFieldFunc):
             self.definition += ' ' + self.initializer
     
     def print(self):
-        print("-----------------------")
-        print(self.brief)
-        print(self.detailed)
-        print(self.definition)
+        return super().print()
 
 FieldMapper  = {
     "signal": globals()["XmlFieldFunc"],
@@ -99,7 +96,7 @@ FieldMapper  = {
     "typedef": globals()['XmlFieldVariable']
 }
 class FieldFactory():
-    def GetField(fieldtype : str, node): 
+    def GetField(fieldtype : str, node) -> XmlField: 
         return FieldMapper[fieldtype](node)
 
 
