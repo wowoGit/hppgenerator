@@ -11,6 +11,7 @@ FieldType: method, attribute, property, typedef, enum
 class XmlField(XmlObject):
     def __init__(self, node : ET.Element):
         super().__init__(node)
+        self.protection = node.get('prot')
     def removescope(self,node:ET.Element,full_def:str):
             class_name = node.get('id')[5:node.get('id').find('_')]
             namespace_start_pos = full_def.find(class_name)
@@ -48,6 +49,7 @@ class XmlFieldFunc(XmlField):
         func_def = ""
         full_def = node.find('definition').text
         func_name = node.find('name').text
+        self.name = func_name
 
 
 

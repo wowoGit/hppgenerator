@@ -22,7 +22,7 @@ class XmlClass(XmlObject):
         for section in self.sections:
             print("Section: {}".format(section.kind))
             for field in section.fields:
-                field.print()
+                print(field.print())
     
     
         

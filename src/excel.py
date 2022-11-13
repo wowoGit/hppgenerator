@@ -1,9 +1,12 @@
 import numpy as np
 import pandas as pd
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Color, PatternFill, Font, Border
-from openpyxl.styles import colors
 from openpyxl.cell import Cell
+from openpyxl.styles import Border, Color, Font, PatternFill, colors
+
+from Class import XmlClass
+from Field import *
+
 table = {
     
         "Software Unit Information" : None,
@@ -24,7 +27,9 @@ table = {
     
 }
 class Table:
-    def __init__(self):
+    def __init__(self,workbook: Workbook, xmlclass: XmlClass):
+        self.workbook = workbook
+        self.xmlclass = xmlclass
         self._interface = None
         self._unitname = None
         self._prototype = None
@@ -39,9 +44,48 @@ class Table:
                     [
                         "Type", "Name", "Value/Range", "IN/OUT", "Description",
                     ],
-                ]
+                ],
+                'Return Type': [
+                    [
+                    'Type', 'Value/Range'
+                    ]
+                ],
+                'Description': None
+
     
         }
+    def toExcel(self,path):
+        row = 1
+        column = 2
+        ws = self.workbook.active
+        for section in self.xmlclass.sections:
+            if section.kind.startswith('public'):
+                for field in section.fields:
+                    row += 3
+                    self.inteface = 'YES'
+                    self.unitname = field.name
+                    self.prototype = field.definition
+                    if len(field.returnval) > 0:
+                        self.table['Return Type'].append([field.returnval['type'], 'Range 1-10'] )
+                        self.table['Description'] = field.returnval['description']
+                    for param in field.params:
+                        self.parameters = [param['type'], param['name'], 'Range 1-10', 'IN', param['description']]
+                    
+                    for k, v in self.table.items():
+                        ws.cell(row, 1).value = k
+                        if type(v) == list:
+                            ws.merge_cells(start_row=row, start_column=1, end_row=row + len(v) - 1,end_column=1)
+                            for inner in v:
+                                for val in inner:
+                                    ws.cell(row, column).value = val
+                                    column += 1
+                                column = 2
+                                row+=1
+                            continue
+                        ws.cell(row, column).value = v
+                        row +=1
+        self.workbook.save(path)
+
     def _get_interface(self):
         return self.table.get('Interface')
 
@@ -90,39 +134,4 @@ class Table:
 
 
 
-file = load_workbook('testfiles/SW_Unit_example.xlsx')
-empty = Workbook()
-worksheet = file.active
-ws = empty.active
-redFill = PatternFill(start_color='FFECF0F1',
-                        end_color='FFECF0F1',
-                   fill_type='solid')
-row = 1
-column = 1
-tab = Table()
-tab.inteface = "dsads"
-print(tab.inteface)
-tab.inteface = 'YES'
-tab.unitname = 'someFunc'
-tab.prototype = 'void someFunc(int a, double b)'
-tab.parameters = ['int','a', '0...255', 'IN', "Desc"]
-tab.parameters = ['double','b', '0...255', 'IN']
-for k, v in tab.table.items():
-    ws.cell(row, 1).value = k
-    ws.cell(row,1).fill = redFill
-    if type(v) == list:
-        ws.merge_cells(start_row=row, start_column=1, end_row=row + len(v) - 1,end_column=1)
-        for inner in v:
-            for val in inner:
-                col = column + 1
-                ws.cell(row, col).value = val
-                column +=1
-            column = 1
-            row+=1
-        break
 
-    ws.cell(row, 2).value = v
-    row +=1
-
-ws.merge_cells('A2')
-empty.save("testfiles/sample.xlsx")
