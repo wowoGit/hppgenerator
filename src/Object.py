@@ -14,12 +14,12 @@ class XmlObject:
         self.template = None
         if self.containsField(node,'templateparamlist'):
             templatelist = node.find('templateparamlist')
-            self.template = "template< "
+            self.template = "<"
             for field in templatelist.getchildren():
                 self.template += field.findtext('type') + ' '
                 if self.containsField(field,'declname'):
-                    self.template += field.findtext('declname') + ' '
-            self.template += '>\n'
+                    self.template += ' ' + field.findtext('declname')
+            self.template += '>'
     def formBrief(self,node : ET.Element) :
         self.brief = None
         if self.containsField(self.xmlnode,'briefdescription'):
@@ -46,6 +46,13 @@ class XmlObject:
                             param_dir = param_name.get('direction')
                             param_name_text = param_name.text
                             param_desc_text = field.find('parameterdescription/para').text
+                            range_text = None
+                            if param_desc_text.__contains__('Range'):
+                                range_keyword_start = param_desc_text.find('Range')
+                                range_end = param_desc_text[range_keyword_start:].find('.') + range_keyword_start
+                                range_text = param_desc_text[range_keyword_start + len('Range '):range_end]
+                                param_desc_text = param_desc_text[:range_keyword_start] + param_desc_text[range_end+1:]
+
                             self.xmlnode.findall('param')
                             param = [param for param in self.xmlnode.findall('param') if param.findtext('declname') ==param_name_text][0]
                             param_type = param.find('type')
@@ -54,7 +61,7 @@ class XmlObject:
                                 ref = param_type.find('ref')
                                 param_type_text += ref.text + ref.tail
                             #TODO: ADD RANGES
-                            self.params.append({'name': param_name_text, 'type': param_type_text, 'description': param_desc_text})
+                            self.params.append({'name': param_name_text, 'type': param_type_text, 'value/range':range_text,"direction":'IN', 'description': param_desc_text})
                             self.detailed.append("@param[{0}] {1} {2}".format(param_dir, param_name_text, param_desc_text))
                 if self.containsField(para, "simplesect"):
                     simplesect = para.find('simplesect')

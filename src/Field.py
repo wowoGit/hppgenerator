@@ -63,7 +63,9 @@ class XmlFieldFunc(XmlField):
         if self.containsField(node,'argsstring'):
             func_def += node.findtext('argsstring')
         if self.template is not None:
-            func_def = self.template + func_def
+            arg_pos = func_def.find('(')
+            func_def = func_def[:arg_pos] + self.template + func_def[arg_pos:]
+            self.name +=self.template
         return func_def
             
     def print(self) -> str:
