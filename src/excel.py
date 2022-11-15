@@ -1,7 +1,12 @@
+#!/usr/bin/env python3
+import types
 import xml.etree.ElementTree as ET
+import openpyxl
+import glob
+import os
 from openpyxl import Workbook
-from openpyxl.cell import Cell
-from openpyxl.styles import Border,Side, PatternFill, Alignment
+from openpyxl.styles import Alignment, Border, PatternFill, Side
+import argparse
 
 export_to_excel = [
     'public-func',
@@ -17,6 +22,14 @@ export_to_excel = [
     'friend',
     'prototype'
 ]
+def str_if_none(val):
+    return val or ''
+def unpack_ref(node: ET.Element):
+    ref = node[0]
+    return str_if_none(node.text) + ref.text + str_if_none(ref.tail)
+def removescope(name :str):
+    namespace_end = name.find('::')
+    return name[namespace_end+2:] if namespace_end != -1 else name
 class XmlObject:
     def __init__(self,node: ET.Element):
         self.xmlnode = node
@@ -41,51 +54,57 @@ class XmlObject:
             brief_node = self.xmlnode.find('briefdescription')
             for field in brief_node.getchildren():
                 self.brief = ''
-                if len(field.getchildren()) == 0:
-                    self.brief = field.text
-                else:
+                if self.containsField(field,'ref'):
                     ref = field.getchildren()[0]
                     self.brief += str(field.text or '') + ref.text + ref.tail
+                else:
+                    self.brief = field.text
     
     def formDetailed(self):
-        self.detailed = []
-        self.params = []
+        def getRange(string: str):
+            if param_desc_text.__contains__('Range'):
+                range_keyword_start = param_desc_text.find('Range')
+                range_end = param_desc_text[range_keyword_start:].find('.') + range_keyword_start
+                range_text = param_desc_text[range_keyword_start + len('Range '):range_end]
+                stripped_string = string[:range_keyword_start] + string[range_end+1:]
+                return stripped_string,range_text
+
+
+        self.params_desc = {}
         self.returnval = {}
         if self.containsField(self.xmlnode,'detaileddescription'):
             detailed_node = self.xmlnode.find('detaileddescription')
             for para in detailed_node.getchildren():
                 if self.containsField(para, 'parameterlist'):
                     for field in para.find('parameterlist').getchildren():
-                            #param_name_list = item.getchildren()[0]
                             param_name = field.find('parameternamelist/parametername')
-                            param_dir = param_name.get('direction')
                             param_name_text = param_name.text
+                            param_dir = param_name.get('direction')
                             param_desc_text = field.find('parameterdescription/para').text
                             range_text = None
                             if param_desc_text.__contains__('Range'):
-                                range_keyword_start = param_desc_text.find('Range')
-                                range_end = param_desc_text[range_keyword_start:].find('.') + range_keyword_start
-                                range_text = param_desc_text[range_keyword_start + len('Range '):range_end]
-                                param_desc_text = param_desc_text[:range_keyword_start] + param_desc_text[range_end+1:]
-
+                                param_desc_text,range_text = getRange(param_desc_text)
                             self.xmlnode.findall('param')
                             param = [param for param in self.xmlnode.findall('param') if param.findtext('declname') ==param_name_text][0]
                             param_type = param.find('type')
-                            param_type_text = param_type.text
+                            param_type_text = param_type.text or ''
                             if self.containsField(param_type,'ref'):
-                                ref = param_type.find('ref')
-                                param_type_text += ref.text + ref.tail
-                            self.params.append({'name': param_name_text, 'type': param_type_text, 'value/range':range_text,"direction":'IN', 'description': param_desc_text})
-                            self.detailed.append("@param[{0}] {1} {2}".format(param_dir, param_name_text, param_desc_text))
+                                param_type_text += unpack_ref(param_type)
+                            self.params_desc[param_name_text] = { 'value/range':range_text, "direction":'IN', 'description': param_desc_text}
                 if self.containsField(para, "simplesect"):
                     simplesect = para.find('simplesect')
-                    kind = simplesect.get('kind')
                     simplesect_text = simplesect.find('para').text
-                    self.returnval['type'] = self.xmlnode.findtext('type')
+                    if self.containsField(simplesect.find('para'),'ref'):
+                        simplesect_text += unpack_ref(param_type)
+                    range_text = None
+                    if simplesect_text.__contains__('Range'):
+                        simplesect,range_text = getRange(simplesect)
+                    if self.containsField(self.xmlnode.find('type'),'ref'):
+                        self.returnval['type'] = unpack_ref(self.xmlnode.find('type'))
+                    else:
+                        self.returnval['type'] = self.xmlnode.findtext('type')
                     self.returnval['description'] = simplesect_text
-                    self.detailed.append("@{0} {1}".format(kind,simplesect_text))
-        if self.detailed == "":
-            self.detailed = None
+                    self.returnval['range/value'] = range_text
 
                     
 
@@ -111,13 +130,26 @@ class XmlFieldFunc(XmlField):
     def __init__(self, node: ET.Element):
         super().__init__(node)
         self.formDefinition()
+        self.formParams()
+
+    def formParams(self):
+        self.params = []
+        for param in self.xmlnode.findall('param'):
+            param_name = param.findtext('declname')
+            param_type = param.findtext('type')
+            self.params.append({
+             'name':param_name,
+             'type':param_type,
+             'description': self.params_desc.get(param_name,dict()).get('description'),
+             'value/range':self.params_desc.get(param_name,dict()).get('value/range'),
+             'direction':self.params_desc.get(param_name,dict()).get('direction'),
+             })
 
     def formDefinition(self):
         func_def = ""
         full_def = self.xmlnode.find('definition').text
         func_name = self.xmlnode.find('name').text
         self.name = func_name
-
         if full_def.startswith(func_name) or func_name.startswith('~'):
             if self.xmlnode.get('explicit') == 'yes':
                 func_def += 'explicit '
@@ -146,7 +178,7 @@ class XmlClass(XmlObject):
         super().__init__(root.find('compounddef'))
         self.inherits = None
         self.inheritance_type = None
-        self.name = self.xmlnode.findtext('compoundname')
+        self.name = removescope(self.xmlnode.findtext('compoundname'))
         if self.containsField(self.xmlnode,'basecompoundref'):
             self.inherits = self.xmlnode.findtext('basecompoundref')
             self.inheritance_type = self.xmlnode.find('basecompoundref').get('prot')
@@ -163,9 +195,8 @@ class TableForm:
         self._parameters = None
         self._returnval = None
         self._return_description = None
+        self.header = 'Software Unit Information'
         self.table = {
-    
-                "Software Unit Information" : None,
                 "Interface" : None,
                 "Unit Name": None,
                 "Prototype" : None,
@@ -275,29 +306,39 @@ class Table:
                                     end_color='FFB2B2B2',
                                     fill_type='solid')
 
-    def toExcel(self,path):
+    def fillForm(self,field:XmlFieldFunc):
+        form = TableForm()
+        form.inteface = 'YES' if field.protection == 'public' else 'NO'
+        form.unitname = field.name
+        form.prototype = field.definition
+        form.return_description = field.brief
+        if len(field.returnval) > 0:
+            form.returntype = [field.returnval['type'], field.returnval['range/value']]
+        else:
+                form.returntype = ['-','-']
+        if len(field.params) > 0:
+            for param in field.params:
+                form.parameters = [param['type'], param['name'], param['value/range'], param['direction'], param['description']]
+        else:
+                form.parameters = ['-','-','-','-','-',]
+        return form
+
+    def toExcel(self):
         row = 1
         column = 2
         ws = self.workbook.create_sheet(self.xmlclass.name)
         for section in self.xmlclass.sections:
             if section.kind in export_to_excel:
                 for field in section.fields:
+                    form = self.fillForm(field) 
                     table_start_row = row
-                    rowform = TableForm()
-                    rowform.inteface = 'YES' if field.protection == 'public' else 'NO'
-                    rowform.unitname = field.name
-                    rowform.prototype = field.definition
-                    rowform.return_description = field.brief
-                    if len(field.returnval) > 0:
-                        rowform.returntype = [field.returnval['type'], 'Range 1-10']
-                    else:
-                            rowform.returntype = ['-','-']
-                    if len(field.params) > 0:
-                        for param in field.params:
-                            rowform.parameters = [param['type'], param['name'], param['value/range'], param['direction'], param['description']]
-                    else:
-                            rowform.parameters = ['-','-','-','-','-',]
-                    for k, v in rowform.table.items():
+                    ws.cell(row,1).value = form.header
+                    ws.cell(row=row, column=1).border = self.border
+                    ws.cell(row=row, column=1).fill = self.cellFill
+                    ws.merge_cells(start_row=row, start_column=1, end_row=row,end_column=6)
+                    ws.cell(row=row,column=1).alignment = Alignment(horizontal='center')
+                    row += 1
+                    for k, v in form.table.items():
                         ws.cell(row, 1).value = k
                         ws.cell(row,1).fill = self.cellFill
                         ws.cell(row,1).border = self.border
@@ -307,8 +348,13 @@ class Table:
                             row_old = row
                             for inner in v:
                                 for val in inner:
+                                    if val in v[0]:
+                                        ws.cell(row, column).fill = self.cellFill
+                                    ws.cell(row, column).border = self.border
                                     ws.cell(row, column).value = val
                                     column += 1
+                                    if k == 'Return Type' or k == 'Global Variables':
+                                        column +=1
                                 column = 2
                                 row+=1
                             if k == 'Return Type' or k == 'Global Variables':
@@ -317,15 +363,15 @@ class Table:
                                     ws.merge_cells(start_row=merge_row, start_column=2, end_row=merge_row,end_column = 3)
                                     ws.merge_cells(start_row=merge_row, start_column=4, end_row=merge_row,end_column = 6)
                                     merge_row += 1
-                            continue
-                        ws.cell(row, column).value = v
-                        ws.cell(row,column).border = self.border
-                        ws.merge_cells(start_row=row, start_column=2, end_row=row,end_column = 6)
-                        row +=1
+                        else:
+                            ws.cell(row, column).value = v
+                            ws.cell(row,column).border = self.border
+                            ws.merge_cells(start_row=row, start_column=2, end_row=row,end_column = 6)
+                            row +=1
+
                     self.setBorder(row_start = table_start_row, row_end=row-1,col_start=1,col_end=6,border=self.border)
                     row += 3
 
-        self.workbook.save(path)
     def setBorder(self, row_start, row_end, col_start, col_end,border : Border):
         ws = self.workbook.active
         for row in ws.iter_rows(min_row=row_start, min_col=col_start, max_row=row_end, max_col=col_end):
@@ -334,13 +380,20 @@ class Table:
 
 
 def main():
-    vehicledata = XmlClass("/home/vsildirian/etc/hppgenerator/testfiles/xml/classVehicleDataClient.xml")
+    parser = argparse.ArgumentParser(
+                    prog = 'ProgramName',
+                    description = 'What the program does',
+                    epilog = 'Text at the bottom of help')
+    parser.add_argument("-d", "--Directory",dest="directory", help = "Starting directory",required=True)
+    args = parser.parse_args()
+    files = [file for file in glob.glob(args.directory + '/*.xml') if os.path.basename(file).startswith('class') == True]
     #gen = Generator(vehicledata)
     wb = Workbook()
-
-    tbl = Table(wb,vehicledata)
-    tbl.toExcel("testfiles/sample.xlsx")
-
+    for file in files:
+        xmlclass = XmlClass(file)
+        tbl = Table(wb,xmlclass)
+        tbl.toExcel()
+    wb.save('../testfiles/sample.xlsx')
 if __name__ == '__main__':
     main()
 
