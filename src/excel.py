@@ -62,49 +62,51 @@ class XmlObject:
     
     def formDetailed(self):
         def getRange(string: str):
-            if param_desc_text.__contains__('Range'):
-                range_keyword_start = param_desc_text.find('Range')
-                range_end = param_desc_text[range_keyword_start:].find('.') + range_keyword_start
-                range_text = param_desc_text[range_keyword_start + len('Range '):range_end]
+                range_keyword_start = string.find('Range')
+                range_end = str(string[range_keyword_start:]).find('.') + range_keyword_start
+                range_text = string[range_keyword_start + len('Range '):range_end]
                 stripped_string = string[:range_keyword_start] + string[range_end+1:]
                 return stripped_string,range_text
 
 
         self.params_desc = {}
         self.returnval = {}
+        param_desc_text = ''
         if self.containsField(self.xmlnode,'detaileddescription'):
             detailed_node = self.xmlnode.find('detaileddescription')
             for para in detailed_node.getchildren():
-                if self.containsField(para, 'parameterlist'):
-                    for field in para.find('parameterlist').getchildren():
-                            param_name = field.find('parameternamelist/parametername')
-                            param_name_text = param_name.text
-                            param_dir = param_name.get('direction')
-                            param_desc_text = field.find('parameterdescription/para').text
-                            range_text = None
-                            if param_desc_text.__contains__('Range'):
-                                param_desc_text,range_text = getRange(param_desc_text)
-                            self.xmlnode.findall('param')
-                            param = [param for param in self.xmlnode.findall('param') if param.findtext('declname') ==param_name_text][0]
-                            param_type = param.find('type')
-                            param_type_text = param_type.text or ''
-                            if self.containsField(param_type,'ref'):
-                                param_type_text += unpack_ref(param_type)
-                            self.params_desc[param_name_text] = { 'value/range':range_text, "direction":'IN', 'description': param_desc_text}
-                if self.containsField(para, "simplesect"):
-                    simplesect = para.find('simplesect')
-                    simplesect_text = simplesect.find('para').text
-                    if self.containsField(simplesect.find('para'),'ref'):
-                        simplesect_text += unpack_ref(param_type)
-                    range_text = None
-                    if simplesect_text.__contains__('Range'):
-                        simplesect,range_text = getRange(simplesect)
-                    if self.containsField(self.xmlnode.find('type'),'ref'):
-                        self.returnval['type'] = unpack_ref(self.xmlnode.find('type'))
-                    else:
-                        self.returnval['type'] = self.xmlnode.findtext('type')
-                    self.returnval['description'] = simplesect_text
-                    self.returnval['range/value'] = range_text
+                for child in list(para):
+                    if child.get('kind') == 'param':
+                        for field in child.getchildren():
+                                param_name = field.find('parameternamelist/parametername')
+                                param_name_text = param_name.text
+                                param_dir = param_name.get('direction')
+                                param_desc_text = field.find('parameterdescription/para').text
+                                range_text = None
+                                if param_desc_text.__contains__('Range'):
+                                    param_desc_text,range_text = getRange(param_desc_text)
+                                param = [param for param in self.xmlnode.findall('param') if param.findtext('declname') ==param_name_text][0]
+                                param_type = param.find('type')
+                                param_type_text = param_type.text or ''
+                                if self.containsField(param_type,'ref'):
+                                    param_type_text += unpack_ref(param_type)
+                                self.params_desc[param_name_text] = { 'value/range':range_text, "direction":param_dir, 'description': param_desc_text}
+                    if child.get('kind') == 'return':
+                        simplesect_text = str_if_none(child.find('para').text)
+                        if self.containsField(child.find('para'),'ref'):
+                            simplesect_text += unpack_ref(child.find('para'))
+                        range_text = None
+                        if simplesect_text.__contains__('Range'):
+                            simplesect_text,range_text = getRange(simplesect_text)
+                        if self.containsField(self.xmlnode.find('type'),'ref'):
+                            self.returnval['type'] = unpack_ref(self.xmlnode.find('type'))
+                        else:
+                            self.returnval['type'] = self.xmlnode.findtext('type')
+                        self.returnval['description'] = simplesect_text
+                        self.returnval['range/value'] = range_text
+                    if child.get('kind') == 'see':
+                        para = child.find('para')
+                        self.brief += para.findtext('ref')
 
                     
 
@@ -136,7 +138,11 @@ class XmlFieldFunc(XmlField):
         self.params = []
         for param in self.xmlnode.findall('param'):
             param_name = param.findtext('declname')
-            param_type = param.findtext('type')
+            param_type = ''
+            if self.containsField(param.find('type'),'ref'):
+                param_type = unpack_ref(param.find('type'))
+            else:
+                param_type = param.findtext('type')
             self.params.append({
              'name':param_name,
              'type':param_type,
@@ -155,8 +161,9 @@ class XmlFieldFunc(XmlField):
                 func_def += 'explicit '
             func_def += func_name
         else:
-            stripped_def = self.removescope(full_def)
-            func_def += stripped_def 
+            #stripped_def = self.removescope(full_def)
+            #stripped_def = self.removescope(full_def)
+            func_def += full_def 
         if self.containsField(self.xmlnode,'argsstring'):
             func_def += self.xmlnode.findtext('argsstring')
         if self.template is not None:
@@ -298,15 +305,32 @@ class Table:
     def __init__(self,workbook: Workbook, xmlclass: XmlClass):
             self.workbook = workbook
             self.xmlclass = xmlclass
+            self.worksheet = self.workbook.create_sheet(self.xmlclass.name)
             self.border = Border(left=Side(style='thin'), 
                      right=Side(style='thin'), 
                      top=Side(style='thin'), 
                      bottom=Side(style='thin'))
-            self.cellFill = PatternFill(start_color='FFB2B2B2',
+            self.fill = PatternFill(start_color='FFB2B2B2',
                                     end_color='FFB2B2B2',
                                     fill_type='solid')
 
+    def fillHeader(self):
+        self.worksheet.cell(row=1,column=1).value = 'Class'
+        self.worksheet.cell(row=1,column=2).value = self.xmlclass.name
+        self.worksheet.cell(row=2,column=1).value = 'Description'
+        self.worksheet.cell(row=2,column=2).value = self.xmlclass.brief
+        self.setBorder(1,2,1,2,self.border)
+        self.setFill(1,2,1,1,self.fill)
+        self.setAlignment(1,2,1,1, Alignment(horizontal='center',vertical='center',wrap_text=True))
+        self.setAlignment(1,2,2,2, Alignment(wrap_text=True))
+
     def fillForm(self,field:XmlFieldFunc):
+        self.worksheet.column_dimensions['A'].width = 25.67
+        self.worksheet.column_dimensions['B'].width = 25.78
+        self.worksheet.column_dimensions['C'].width = 20.89
+        self.worksheet.column_dimensions['D'].width = 28.56
+        self.worksheet.column_dimensions['E'].width = 9.22
+        self.worksheet.column_dimensions['F'].width = 56.78
         form = TableForm()
         form.inteface = 'YES' if field.protection == 'public' else 'NO'
         form.unitname = field.name
@@ -324,33 +348,38 @@ class Table:
         return form
 
     def toExcel(self):
-        row = 1
+        self.fillHeader()
+        #self.setAlignment(1,500,1,6,Alignment(wrap_text=True))
+        ws = self.worksheet
+        table_spacing = 3
+        row = ws.max_row + table_spacing
         column = 2
-        ws = self.workbook.create_sheet(self.xmlclass.name)
+        ws = self.worksheet
         for section in self.xmlclass.sections:
             if section.kind in export_to_excel:
                 for field in section.fields:
                     form = self.fillForm(field) 
                     table_start_row = row
                     ws.cell(row,1).value = form.header
-                    ws.cell(row=row, column=1).border = self.border
-                    ws.cell(row=row, column=1).fill = self.cellFill
                     ws.merge_cells(start_row=row, start_column=1, end_row=row,end_column=6)
                     ws.cell(row=row,column=1).alignment = Alignment(horizontal='center')
+                    self.setAlignment(row,row,1,1, Alignment(horizontal='center',vertical='center',wrap_text=True))
                     row += 1
                     for k, v in form.table.items():
                         ws.cell(row, 1).value = k
-                        ws.cell(row,1).fill = self.cellFill
-                        ws.cell(row,1).border = self.border
                         ws.cell(row,1).alignment = Alignment(horizontal='center')
+                        self.setAlignment(row,row,1,1, Alignment(horizontal='center',vertical='center',wrap_text=True))
                         if type(v) == list:
                             ws.merge_cells(start_row=row, start_column=1, end_row=row + len(v) - 1,end_column=1)
                             row_old = row
                             for inner in v:
                                 for val in inner:
                                     if val in v[0]:
-                                        ws.cell(row, column).fill = self.cellFill
-                                    ws.cell(row, column).border = self.border
+                                        ws.cell(row, column).fill = self.fill
+                                        self.setAlignment(row,row,column,column, Alignment(horizontal='center',vertical='center',wrap_text=True))
+                                        self.setFill(row,row,1,6,self.fill)
+                                    else:
+                                        self.setAlignment(row,row,column,column,Alignment(wrap_text=True))
                                     ws.cell(row, column).value = val
                                     column += 1
                                     if k == 'Return Type' or k == 'Global Variables':
@@ -365,19 +394,30 @@ class Table:
                                     merge_row += 1
                         else:
                             ws.cell(row, column).value = v
-                            ws.cell(row,column).border = self.border
+                            self.setAlignment(row,row,column,column,Alignment(wrap_text=True))
                             ws.merge_cells(start_row=row, start_column=2, end_row=row,end_column = 6)
                             row +=1
 
                     self.setBorder(row_start = table_start_row, row_end=row-1,col_start=1,col_end=6,border=self.border)
-                    row += 3
+                    self.setFill(table_start_row,row - 1,1,1,self.fill)
+                    row += table_spacing
 
     def setBorder(self, row_start, row_end, col_start, col_end,border : Border):
-        ws = self.workbook.active
+        ws = self.worksheet
         for row in ws.iter_rows(min_row=row_start, min_col=col_start, max_row=row_end, max_col=col_end):
             for cell in row:
                 cell.border = border
+    def setAlignment(self, row_start, row_end, col_start, col_end,alignment):
+        ws = self.worksheet
+        for row in ws.iter_rows(min_row=row_start, min_col=col_start, max_row=row_end, max_col=col_end):
+            for cell in row:
+                cell.alignment = alignment
 
+    def setFill(self, row_start, row_end, col_start, col_end,fill : PatternFill):
+        ws = self.worksheet
+        for row in ws.iter_rows(min_row=row_start, min_col=col_start, max_row=row_end, max_col=col_end):
+            for cell in row:
+                cell.fill = fill
 
 def main():
     parser = argparse.ArgumentParser(
@@ -386,14 +426,15 @@ def main():
                     epilog = 'Text at the bottom of help')
     parser.add_argument("-d", "--Directory",dest="directory", help = "Starting directory",required=True)
     args = parser.parse_args()
-    files = [file for file in glob.glob(args.directory + '/*.xml') if os.path.basename(file).startswith('class') == True]
+    files = [file for file in glob.glob(args.directory + '/*.xml') if os.path.basename(file).startswith('class') and not os.path.basename(file).__contains__('Base')]
     #gen = Generator(vehicledata)
     wb = Workbook()
+    wb.remove(wb.active)
     for file in files:
         xmlclass = XmlClass(file)
         tbl = Table(wb,xmlclass)
         tbl.toExcel()
-    wb.save('../testfiles/sample.xlsx')
+    wb.save(os.path.join(os.getcwd(),'result.xlsx'))
 if __name__ == '__main__':
     main()
 
