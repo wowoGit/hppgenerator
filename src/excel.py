@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import types
 import xml.etree.ElementTree as ET
 import openpyxl
 import glob
@@ -8,6 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, PatternFill, Side
 import argparse
 
+#sections that should be exported to excel
 export_to_excel = [
     'public-func',
     'public-slot',
@@ -22,45 +22,66 @@ export_to_excel = [
     'friend',
     'prototype'
 ]
+
 def str_if_none(val):
     return val or ''
+
 def unpack_ref(node: ET.Element):
     ref = node[0]
     return str_if_none(node.text) + ref.text + str_if_none(ref.tail)
+
 def removescope(name :str):
     namespace_end = name.find('::')
     return name[namespace_end+2:] if namespace_end != -1 else name
+
 class XmlObject:
     def __init__(self,node: ET.Element):
         self.xmlnode = node
-        self.name = node.findtext('name')
         self.formBrief()
-        self.formDetailed()
+
+
+    def formBrief(self) :
+        self.brief = None
+        if self.containsField(self.xmlnode,'briefdescription'):
+            brief_node = self.xmlnode.find('briefdescription')
+            for field in list(brief_node):
+                self.brief = ''
+                if self.containsField(field,'ref'):
+                    ref = list(field)[0]
+                    self.brief += str(field.text or '') + ref.text + ref.tail
+                else:
+                    self.brief = field.text
+    
+    def containsField(self,node: ET.Element, fieldname:str):
+        if node.find(fieldname) is not None:
+            return True
+        return False
+
+class XmlFunc(XmlObject):
+    def __init__(self, node: ET.Element):
+        super().__init__(node)
+        self.params_desc = {}
+        self.returnval = {}
+        self.name = ''
+        self.definition = ''
+        self.template = ''
+        self.protection = node.get('prot')
         self.formTemplate()
+        self.formDefinition()
+        self.formParams()
 
     def formTemplate(self):
         self.template = None
         if self.containsField(self.xmlnode,'templateparamlist'):
             templatelist = self.xmlnode.find('templateparamlist')
             self.template = "<"
-            for field in templatelist.getchildren():
+            for field in list(templatelist):
                 self.template += field.findtext('type') + ' '
                 if self.containsField(field,'declname'):
                     self.template += ' ' + field.findtext('declname')
             self.template += '>'
-    def formBrief(self) :
-        self.brief = None
-        if self.containsField(self.xmlnode,'briefdescription'):
-            brief_node = self.xmlnode.find('briefdescription')
-            for field in brief_node.getchildren():
-                self.brief = ''
-                if self.containsField(field,'ref'):
-                    ref = field.getchildren()[0]
-                    self.brief += str(field.text or '') + ref.text + ref.tail
-                else:
-                    self.brief = field.text
-    
-    def formDetailed(self):
+
+    def formParams(self):
         def getRange(string: str):
                 range_keyword_start = string.find('Range')
                 range_end = str(string[range_keyword_start:]).find('.') + range_keyword_start
@@ -68,16 +89,12 @@ class XmlObject:
                 stripped_string = string[:range_keyword_start] + string[range_end+1:]
                 return stripped_string,range_text
 
-
-        self.params_desc = {}
-        self.returnval = {}
-        param_desc_text = ''
         if self.containsField(self.xmlnode,'detaileddescription'):
             detailed_node = self.xmlnode.find('detaileddescription')
-            for para in detailed_node.getchildren():
+            for para in list(detailed_node):
                 for child in list(para):
                     if child.get('kind') == 'param':
-                        for field in child.getchildren():
+                        for field in list(child):
                                 param_name = field.find('parameternamelist/parametername')
                                 param_name_text = param_name.text
                                 param_dir = param_name.get('direction')
@@ -90,14 +107,14 @@ class XmlObject:
                                 param_type_text = param_type.text or ''
                                 if self.containsField(param_type,'ref'):
                                     param_type_text += unpack_ref(param_type)
-                                self.params_desc[param_name_text] = { 'value/range':range_text, "direction":param_dir, 'description': param_desc_text}
+                                self.params_desc[param_name_text] = { 'value/range':range_text,'type':param_type_text, "direction":param_dir, 'description': param_desc_text}
                     if child.get('kind') == 'return':
                         simplesect_text = str_if_none(child.find('para').text)
                         if self.containsField(child.find('para'),'ref'):
                             simplesect_text += unpack_ref(child.find('para'))
                         range_text = None
                         if simplesect_text.__contains__('Range'):
-                            simplesect_text,range_text = getRange(simplesect_text)
+                            simplesect_text,range_text = getRange(simplesect_text) # range will be stripped from string
                         if self.containsField(self.xmlnode.find('type'),'ref'):
                             self.returnval['type'] = unpack_ref(self.xmlnode.find('type'))
                         else:
@@ -108,48 +125,6 @@ class XmlObject:
                         para = child.find('para')
                         self.brief += para.findtext('ref')
 
-                    
-
-    def containsField(self,node: ET.Element, fieldname:str):
-        if node.find(fieldname) is not None:
-            return True
-        return False
-
-
-class XmlField(XmlObject):
-    def __init__(self, node : ET.Element):
-        super().__init__(node)
-        self.protection = node.get('prot')
-    def removescope(self,full_def:str):
-            class_name = self.xmlnode.get('id')[5:self.xmlnode.get('id').find('_')]
-            namespace_start_pos = full_def.find(class_name)
-            first = full_def[:namespace_start_pos]
-            second = full_def[full_def.rfind('::')+2:]
-            stripped_def = first + second
-            return stripped_def
-
-class XmlFieldFunc(XmlField):
-    def __init__(self, node: ET.Element):
-        super().__init__(node)
-        self.formDefinition()
-        self.formParams()
-
-    def formParams(self):
-        self.params = []
-        for param in self.xmlnode.findall('param'):
-            param_name = param.findtext('declname')
-            param_type = ''
-            if self.containsField(param.find('type'),'ref'):
-                param_type = unpack_ref(param.find('type'))
-            else:
-                param_type = param.findtext('type')
-            self.params.append({
-             'name':param_name,
-             'type':param_type,
-             'description': self.params_desc.get(param_name,dict()).get('description'),
-             'value/range':self.params_desc.get(param_name,dict()).get('value/range'),
-             'direction':self.params_desc.get(param_name,dict()).get('direction'),
-             })
 
     def formDefinition(self):
         func_def = ""
@@ -161,8 +136,6 @@ class XmlFieldFunc(XmlField):
                 func_def += 'explicit '
             func_def += func_name
         else:
-            #stripped_def = self.removescope(full_def)
-            #stripped_def = self.removescope(full_def)
             func_def += full_def 
         if self.containsField(self.xmlnode,'argsstring'):
             func_def += self.xmlnode.findtext('argsstring')
@@ -171,11 +144,12 @@ class XmlFieldFunc(XmlField):
             func_def = func_def[:arg_pos] + self.template + func_def[arg_pos:]
             self.name +=self.template
         self.definition = func_def
+
 class XmlSection(XmlObject):
     def __init__(self,xmlnode: ET.Element):
         super().__init__(xmlnode)
         self.kind = xmlnode.get('kind')
-        self.fields = [XmlFieldFunc(node) for node in self.xmlnode.findall('memberdef')]
+        self.fields = [XmlFunc(node) for node in self.xmlnode.findall('memberdef')]
 
 
 class XmlClass(XmlObject):
@@ -183,12 +157,7 @@ class XmlClass(XmlObject):
         doc = ET.parse(xmlnode)
         root = doc.getroot()
         super().__init__(root.find('compounddef'))
-        self.inherits = None
-        self.inheritance_type = None
         self.name = removescope(self.xmlnode.findtext('compoundname'))
-        if self.containsField(self.xmlnode,'basecompoundref'):
-            self.inherits = self.xmlnode.findtext('basecompoundref')
-            self.inheritance_type = self.xmlnode.find('basecompoundref').get('prot')
         self.sections = [XmlSection(node) for node in self.xmlnode.findall('sectiondef') if node.get('kind') in export_to_excel]
     
 
@@ -196,12 +165,6 @@ class XmlClass(XmlObject):
            
 class TableForm:
     def __init__(self) -> None:
-        self._interface = None
-        self._unitname = None
-        self._prototype = None
-        self._parameters = None
-        self._returnval = None
-        self._return_description = None
         self.header = 'Software Unit Information'
         self.table = {
                 "Interface" : None,
@@ -229,78 +192,58 @@ class TableForm:
     
         }
     
-
-    def _get_interface(self):
+    @property
+    def interface(self):
         return self.table.get('Interface')
 
-    def _set_interface(self, value):
+    @interface.setter
+    def interface(self, value):
         self.table['Interface'] = value
 
-    def _get_returntype(self):
+    @property
+    def returntype(self):
         return self.table.get('Return Type')
 
-    def _set_returntype(self, value):
+    @returntype.setter
+    def returntype(self, value):
         if len(self.table['Return Type']) > 1:
             self.table['Return Type'][1] = value
             return
         
         self.table['Return Type'].append(value)
 
-
-    def _get_unitname(self):
+    @property
+    def unitname(self):
         return self.table.get('Unit Name')
 
-    def _set_unitname(self, value):
+    @unitname.setter
+    def unitname(self, value):
         self.table['Unit Name'] = value
 
-    def _get_prototype(self):
+    @property
+    def prototype(self):
         return self.table.get('Prototype')
 
-    def _set_prototype(self, value):
+    @prototype.setter
+    def prototype(self, value):
         self.table['Prototype'] = value
 
-    def _get_parameters(self):
+    @property
+    def parameters(self):
         return self.table.get('Parameters')
 
-    def _set_parameters(self, value):
+    @parameters.setter
+    def parameters(self, value):
         self.table['Parameters'].append(value)
 
-    def _get_description(self):
+    @property
+    def description(self):
         return self.table.get('Description')
 
-    def _set_description(self, value):
+    @description.setter
+    def description(self, value):
         self.table['Description'] = value
 
-    inteface = property(
-        fget=_get_interface,
-        fset=_set_interface,
-        doc="The interface property."
-    )
-    return_description = property(
-        fget=_get_description,
-        fset=_set_description,
-        doc="The return description property."
-    )
-    returntype = property(
-        fget=_get_returntype,
-        fset=_set_returntype,
-        doc="The return type property."
-    )
-    unitname = property(
-        fget=_get_unitname,
-        fset=_set_unitname,
-        doc="The Unit Name property."
-    )
-    prototype = property(
-        fget=_get_prototype,
-        fset=_set_prototype,
-        doc="The prototype property."
-    )
-    parameters = property(
-        fget=_get_parameters,
-        fset=_set_parameters,
-        doc="The parameters property."
-    )
 class Table:
     def __init__(self,workbook: Workbook, xmlclass: XmlClass):
             self.workbook = workbook
@@ -313,6 +256,15 @@ class Table:
             self.fill = PatternFill(start_color='FFB2B2B2',
                                     end_color='FFB2B2B2',
                                     fill_type='solid')
+            self.applySize()
+
+    def applySize(self):
+        self.worksheet.column_dimensions['A'].width = 25.67
+        self.worksheet.column_dimensions['B'].width = 25.78
+        self.worksheet.column_dimensions['C'].width = 20.89
+        self.worksheet.column_dimensions['D'].width = 28.56
+        self.worksheet.column_dimensions['E'].width = 9.22
+        self.worksheet.column_dimensions['F'].width = 56.78
 
     def fillHeader(self):
         self.worksheet.cell(row=1,column=1).value = 'Class'
@@ -324,37 +276,34 @@ class Table:
         self.setAlignment(1,2,1,1, Alignment(horizontal='center',vertical='center',wrap_text=True))
         self.setAlignment(1,2,2,2, Alignment(wrap_text=True))
 
-    def fillForm(self,field:XmlFieldFunc):
-        self.worksheet.column_dimensions['A'].width = 25.67
-        self.worksheet.column_dimensions['B'].width = 25.78
-        self.worksheet.column_dimensions['C'].width = 20.89
-        self.worksheet.column_dimensions['D'].width = 28.56
-        self.worksheet.column_dimensions['E'].width = 9.22
-        self.worksheet.column_dimensions['F'].width = 56.78
+    def fillForm(self,field:XmlFunc) -> TableForm:
         form = TableForm()
-        form.inteface = 'YES' if field.protection == 'public' else 'NO'
+        form.interface = 'YES' if field.protection == 'public' else 'NO'
         form.unitname = field.name
         form.prototype = field.definition
-        form.return_description = field.brief
+        form.description = field.brief
         if len(field.returnval) > 0:
             form.returntype = [field.returnval['type'], field.returnval['range/value']]
         else:
                 form.returntype = ['-','-']
-        if len(field.params) > 0:
-            for param in field.params:
-                form.parameters = [param['type'], param['name'], param['value/range'], param['direction'], param['description']]
+        if len(field.params_desc) > 0:
+            for param_key_name,param_properties in field.params_desc.items():
+                
+                form.parameters.append([param_properties['type'], # should be strictly in this order
+                                        param_key_name,
+                                        param_properties['value/range'],
+                                        param_properties['direction'],
+                                        param_properties['description']])
         else:
                 form.parameters = ['-','-','-','-','-',]
         return form
 
     def toExcel(self):
         self.fillHeader()
-        #self.setAlignment(1,500,1,6,Alignment(wrap_text=True))
         ws = self.worksheet
         table_spacing = 3
         row = ws.max_row + table_spacing
         column = 2
-        ws = self.worksheet
         for section in self.xmlclass.sections:
             if section.kind in export_to_excel:
                 for field in section.fields:
@@ -427,7 +376,6 @@ def main():
     parser.add_argument("-d", "--Directory",dest="directory", help = "Starting directory",required=True)
     args = parser.parse_args()
     files = [file for file in glob.glob(args.directory + '/*.xml') if os.path.basename(file).startswith('class') and not os.path.basename(file).__contains__('Base')]
-    #gen = Generator(vehicledata)
     wb = Workbook()
     wb.remove(wb.active)
     for file in files:
@@ -435,6 +383,7 @@ def main():
         tbl = Table(wb,xmlclass)
         tbl.toExcel()
     wb.save(os.path.join(os.getcwd(),'result.xlsx'))
+
 if __name__ == '__main__':
     main()
 
